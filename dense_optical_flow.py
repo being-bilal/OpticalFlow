@@ -22,7 +22,7 @@ while True:
     # Compute dense optical flow
     flow = cv2.calcOpticalFlowFarneback(
         prev_gray, gray, None,
-        pyr_scale=0.5,
+        pyr_scale=0.2,
         levels=3,
         winsize=15,
         iterations=3,
@@ -43,9 +43,10 @@ while True:
     fy = flow[y, x, 1]
 
     # Draw arrows
-    for (x0, y0, dx, dy) in zip(x.flatten(), y.flatten(),
-                                fx.flatten(), fy.flatten()):
-
+    for (x0, y0, dx, dy) in zip(x.flatten(), y.flatten(), fx.flatten(), fy.flatten()):
+        mag = np.sqrt(dx*dx + dy*dy)
+        if mag < 1.0:
+            continue
         end_point = (int(x0 + dx), int(y0 + dy))
         start_point = (int(x0), int(y0))
 
