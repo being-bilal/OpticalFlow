@@ -1,13 +1,6 @@
 import torch
 import torch.nn.functional as F
-from RAFT.core.utils.utils import bilinear_sampler, coords_grid
-
-try:
-    import alt_cuda_corr
-except:
-    # alt_cuda_corr is not compiled
-    pass
-
+from utils.utils import bilinear_sampler, coords_grid
 
 class CorrBlock:
     def __init__(self, fmap1, fmap2, num_levels=4, radius=4):
