@@ -1,7 +1,10 @@
+# Feature encoder for RAFT. That downsamples both the input images by the factor of 8 
+# and outputs a feature map of dimension 256. 
+# H * W * 3 -> H/8 * W/8 * 256
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_planes, planes, norm_fn='group', stride=1):

@@ -14,8 +14,14 @@ from utils import flow_viz
 from utils.utils import InputPadder
 
 
+if torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+elif torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+else:
+    DEVICE = torch.device("cpu")
 
-DEVICE = 'cuda'
+print(f"Using device: {DEVICE}")
 
 def load_image(imfile):
     img = np.array(Image.open(imfile)).astype(np.uint8)
