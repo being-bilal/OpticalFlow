@@ -31,11 +31,8 @@ while True:
         flags=0
     )
 
-    # Create output image
     vis = frame2.copy()
     h, w = gray.shape
-
-    # Sample points on a grid
     y, x = np.mgrid[STEP//2:h:STEP, STEP//2:w:STEP].astype(int)
 
     # Get flow vectors at sampled points
@@ -60,16 +57,11 @@ while True:
             tipLength=0.3
         )
 
-        # Draw starting point
         cv2.circle(vis, start_point, 1, (0, 255, 0), -1)
 
     cv2.imshow("Farneback Optical Flow (Arrows)", vis)
 
     prev_gray = gray
-
-    # ESC to quit
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
 
 cap.release()
 cv2.destroyAllWindows()
