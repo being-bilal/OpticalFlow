@@ -55,8 +55,23 @@ range_records = np.array(range_records)
 
 print(f"Extracted: {len(images)} images, {len(imu_records)} IMU, {len(range_records)} range readings")
 
+# Converting the pixel coordinates to camera coordinates 
+fx, fy, cx, cy = calib['cam0']['intrinsics'] 
+h, w = images[0].shape
+y, x = np.mgrid[0:h, 0:w] # x and y pixel coordinate matrices
+x = (x - cx) / fx
+y = (y - cy) / fy
+
+x_pos, y_pos, z_pos = 0.0, 0.0, 0.0
+heading = 0.0
+trajectory = []
+
+
+
+
 # Compute dense optical flow between consecutive frames
-u_vals, v_vals = compute_uv_dense(images)  
-print(f"u range: [{u_vals.min():.3f}, {u_vals.max():.3f}] px")
-print(f"v range: [{v_vals.min():.3f}, {v_vals.max():.3f}] px")
+# u_vals, v_vals = compute_uv_dense(images)  
+# print(f"u range: [{u_vals.min():.3f}, {u_vals.max():.3f}] px")
+# print(f"v range: [{v_vals.min():.3f}, {v_vals.max():.3f}] px")
+
 
