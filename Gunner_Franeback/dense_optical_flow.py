@@ -34,7 +34,6 @@ while True:
     vis = frame2.copy()
     h, w = gray.shape
     y, x = np.mgrid[STEP//2:h:STEP, STEP//2:w:STEP].astype(int)
-
     # Get flow vectors at sampled points
     fx = flow[y, x, 0]
     fy = flow[y, x, 1]
@@ -56,9 +55,7 @@ while True:
             2,
             tipLength=0.3
         )
-
         cv2.circle(vis, start_point, 1, (0, 255, 0), -1)
-
     cv2.imshow("Farneback Optical Flow (Arrows)", vis)
 
     prev_gray = gray
