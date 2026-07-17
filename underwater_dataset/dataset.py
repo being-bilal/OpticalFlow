@@ -48,9 +48,3 @@ imu_records = np.array(imu_records)
 range_records = np.array(range_records)
 
 print(f"Extracted: {len(images)} images, {len(imu_records)} IMU, {len(range_records)} range readings")
-
-
-print(f"Min: {range_records[:,1].min():.3f}")
-print(f"Max: {range_records[:,1].max():.3f}")
-print(f"Mean: {range_records[:,1].mean():.3f}")
-print(f"Std: {range_records[:,1].std():.3f}") 
