@@ -10,9 +10,5 @@ def compute_uv_dense(images):
             pyr_scale=0.5, levels=3, winsize=15,
             iterations=3, poly_n=5, poly_sigma=1.2, flags=0
         )
-        u = flow[:, :, 0]
-        v = flow[:, :, 1]
-        u_vals.append(u)
-        v_vals.append(v)
 
-    return np.array(u_vals), np.array(v_vals)
+    return flow

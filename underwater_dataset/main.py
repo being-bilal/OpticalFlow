@@ -6,6 +6,8 @@ from pathlib import Path
 import yaml
 import numpy as np
 from opticalflow import compute_uv_dense
+from velocity_calculation import solve_camera_velocity
+from scipy.spatial.transform import Rotation
 
 
 bag_path = Path("dataset/mclab.bag")  
@@ -67,11 +69,40 @@ heading = 0.0
 trajectory = []
 
 
+# converting flow to camera coordinates
+for i in range(len(images) - 1):
+    dt = image_ts[i + 1] - image_ts[i]
+    
+    # Compute dense optical flow between consecutive frames
+    flow = compute_uv_dense(images)  
+    imu_idx = np.argmin(np.abs(imu_records[:, 0] - image_ts[i]))
+    wx_raw, wy_raw, wz_raw = imu_records[imu_idx, 1:4]
+    w_imu = np.array([wx_raw, wy_raw, wz_raw]) # Array of angular velocity from IMU
+    
+    ### Issue : Assuming camera and IMU are aligned (which is not the case)
+    w_cam = w_imu  
+    wx, wy, wz = w_cam * dt # rad/s -> rad/frame
+    r_idx = np.argmin(np.abs(range_records[:, 0] - image_ts[i]))
+    
+    ### Issue : Rangefinder is not aligned with camera (rangefinder is facing downwards, camera is facing forward)
+    Z = np.clip(range_records[r_idx, 1], 0.1, 3.0)  
+    Vx, Vy, Vz = solve_camera_velocity(flow, x, y, fx, fy, wx, wy, wz, Z)
+    R_yaw = Rotation.from_euler('z', heading).as_matrix()
+    motion_world = R_yaw @ np.array([Vx, Vy, Vz])
+    
+    x_pos += motion_world[0]
+    y_pos += motion_world[1]
+    
+    qx, qy, qz, qw = imu_records[imu_idx, 4:8]
+    heading = Rotation.from_quat([qx, qy, qz, qw]).as_euler('xyz')[2]
+    
+    trajectory.append((x_pos, y_pos, z_pos))
+    
+    if i % 500 == 0:
+        print(f"Frame {i}/{len(images)-1}: Vx={Vx:.4f}, Vy={Vy:.4f}, Vz={Vz:.4f}")
 
-
-# Compute dense optical flow between consecutive frames
-# u_vals, v_vals = compute_uv_dense(images)  
-# print(f"u range: [{u_vals.min():.3f}, {u_vals.max():.3f}] px")
-# print(f"v range: [{v_vals.min():.3f}, {v_vals.max():.3f}] px")
+trajectory = np.array(trajectory)
+print(f"Final position: {trajectory[-1]}")
+    
 
 
