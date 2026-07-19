@@ -69,5 +69,4 @@ def get_depth(img0, img1, setup, z_min=0.1, z_max=3.0):
 
     # Reject implausible depths (too close, too far, or numerically unstable from tiny disparity)
     Z[(Z < z_min) | (Z > z_max)] = np.nan
-
-    return Z, rect0
+    return rect0, Z

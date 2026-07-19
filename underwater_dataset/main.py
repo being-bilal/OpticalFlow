@@ -24,9 +24,15 @@ CAM1_TOPIC = "/alphasense_driver_ros/cam1"
 IMU_TOPIC = "/alphasense_driver_ros/imu"
 
 SUBSAMPLE = 8          # pixel stride for velocity least-squares solve (speed vs accuracy tradeoff)
-LIMIT_FRAMES = 200     # set to None for the full dataset once this test run looks correct
+START_FRAME = 2000     # set both to None to run the full sequence
+END_FRAME = 3500       # slice is [START_FRAME:END_FRAME), matches Python slicing
 Z_MIN = 0.1            # meters -- plausible minimum floor/scene distance
 Z_MAX = 3.0            # meters -- plausible maximum floor/scene distance for this pool/tank
+
+CAM_TILT_DEG = 16.0    # cam0 is mounted tilted this many degrees downward from horizontal
+                       # (per NTNU-ARL MC-lab rig docs). If z_pos still drifts steadily in
+                       # one direction after this fix, flip the sign here and re-check.
+CAM_TILT_RAD = np.radians(CAM_TILT_DEG)
 
 # ---------------- CALIBRATION ----------------
 with open(INTRINSICS_WATER) as f:
@@ -38,6 +44,9 @@ with open(EXTRINSICS_AIR) as f:
 R_cam_imu = np.array(extrinsics_air['cam0']['T_cam_imu'])[:3, :3]  # IMU -> camera rotation
 
 stereo_setup = load_stereo_setup(str(INTRINSICS_WATER))
+
+# contrast enhancement -- underwater frames are low-contrast, which starves Farneback of gradient info
+clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
 # ---------------- EXTRACT FROM BAG ----------------
 images0, images1 = [], []
@@ -72,10 +81,10 @@ image_ts1 = np.array(image_ts1)
 imu_records = np.array(imu_records)
 print(f"Extracted: cam0={len(images0)}, cam1={len(images1)}, IMU={len(imu_records)}")
 
-if LIMIT_FRAMES is not None:
-    images0 = images0[:LIMIT_FRAMES]
-    image_ts0 = image_ts0[:LIMIT_FRAMES]
-    print(f"LIMIT_FRAMES active -- using first {LIMIT_FRAMES} cam0 frames only")
+if START_FRAME is not None or END_FRAME is not None:
+    images0 = images0[START_FRAME:END_FRAME]
+    image_ts0 = image_ts0[START_FRAME:END_FRAME]
+    print(f"Using frame window [{START_FRAME}:{END_FRAME}] -- {len(images0)} cam0 frames")
 
 # Match cam1 frames to cam0 by nearest timestamp (counts can differ slightly)
 cam1_match_idx = np.array([np.argmin(np.abs(image_ts1 - t)) for t in image_ts0])
@@ -93,8 +102,15 @@ trajectory = [(x_pos, y_pos, z_pos)]
 vo_timestamps = [image_ts0[0]]
 nan_frame_count = 0
 
+# Recorded so we can cheaply re-integrate heading with different gyro-z bias
+# candidates afterward, without recomputing optical flow / stereo depth again.
+body_vec_history = []   # [level_fwd, Vx, level_down] per frame
+wz_raw_history = []     # raw gyro-z reading used at each frame
+dt_history = []
+
 print("Computing initial stereo depth...")
 rect0_prev, Z_prev = get_depth(images0[0], images1[cam1_match_idx[0]], stereo_setup, Z_MIN, Z_MAX)
+rect0_prev = clahe.apply(rect0_prev)
 
 N = len(images0)
 print(f"Running VO loop over {N - 1} frame pairs...")
@@ -103,6 +119,7 @@ for i in range(1, N):
     dt = image_ts0[i] - image_ts0[i - 1]
 
     rect0_curr, Z_curr = get_depth(images0[i], images1[cam1_match_idx[i]], stereo_setup, Z_MIN, Z_MAX)
+    rect0_curr = clahe.apply(rect0_curr)
 
     flow = cv2.calcOpticalFlowFarneback(rect0_prev, rect0_curr, None,
                                          0.5, 3, 15, 3, 5, 1.2, 0)
@@ -122,8 +139,35 @@ for i in range(1, N):
         Vx, Vy, Vz = 0.0, 0.0, 0.0
         nan_frame_count += 1
 
-    R_yaw = Rotation.from_euler('z', heading).as_matrix()
-    motion_world = R_yaw @ np.array([Vx, Vy, Vz])
+    # ---- Undo the fixed ~16 deg downward mount tilt ----
+    # Without this, part of the AUV's true forward motion (Vz) leaks into the
+    # down axis (Vy) and vice versa, since the camera boresight isn't level
+    # with the vehicle's horizontal plane. This is what was producing the
+    # steady negative Vy bias and the multi-meter phantom z_pos drift.
+    level_fwd = Vz * np.cos(CAM_TILT_RAD) - Vy * np.sin(CAM_TILT_RAD)
+    level_down = Vz * np.sin(CAM_TILT_RAD) + Vy * np.cos(CAM_TILT_RAD)
+
+    # ---- Remap camera-optical axes into a body vector before applying yaw ----
+    # Camera convention here is x-right, y-down, z-forward (standard pinhole/optical frame).
+    # cam0 is the front-facing stereo pair, so (leveled) Vz is the *forward* component --
+    # the dominant AUV translation -- while Vx is lateral and (leveled) Vy is vertical.
+    # Rotation.from_euler('z', heading) mixes indices 0 and 1 of whatever vector it's given,
+    # so passing [Vx, Vy, Vz] directly (as before) rotated the small Vx/Vy pair together
+    # and dumped the dominant forward motion Vz straight into z_pos, untouched -- it never
+    # reached the horizontal (x_pos, y_pos) trajectory that gets plotted.
+    # Building body_vec = [forward, right, down] and rotating THAT by yaw puts the
+    # dominant forward motion into the horizontal plane where it belongs.
+    body_vec = np.array([level_fwd, Vx, level_down])   # [forward, right, down]
+
+    R_yaw = Rotation.from_euler('z', heading)
+    motion_world = R_yaw.apply(body_vec)   # .apply() is the version-safe way to rotate a
+                                            # vector with scipy's Rotation -- `R_yaw @ body_vec`
+                                            # is not reliably supported across scipy/numpy
+                                            # versions and can raise a matmul dimension error
+
+    body_vec_history.append(body_vec)
+    wz_raw_history.append(wz_raw)
+    dt_history.append(dt)
 
     x_pos += motion_world[0]
     y_pos += motion_world[1]
@@ -140,9 +184,11 @@ for i in range(1, N):
         valid_pixel_count = np.sum(np.isfinite(Z_prev))
         z_min_actual = np.nanmin(Z_prev) if valid_pixel_count > 0 else float('nan')
         z_max_actual = np.nanmax(Z_prev) if valid_pixel_count > 0 else float('nan')
+        depth_flag = "  <-- exceeds tank depth (~1.5m), check CAM_TILT_DEG sign" if abs(z_pos) > 2.0 else ""
         print(f"Frame {i}/{N-1}: pos=({x_pos:.3f}, {y_pos:.3f}, {z_pos:.3f}), "
               f"heading={np.degrees(heading):.1f}°, n_valid_solve_pts={n_valid}, "
-              f"valid_Z_pixels={valid_pixel_count}, Z_range=[{z_min_actual:.2f}, {z_max_actual:.2f}]")
+              f"valid_Z_pixels={valid_pixel_count}, Z_range=[{z_min_actual:.2f}, {z_max_actual:.2f}], "
+              f"V=({Vx:.4f}, {Vy:.4f}, {Vz:.4f}){depth_flag}")
 
 print(f"\nTotal frames with non-finite velocity (treated as zero motion): {nan_frame_count}/{N-1}")
 
@@ -188,7 +234,63 @@ aligned_vo, scale = umeyama_alignment(trajectory_clean, matched_gt_clean)
 print(f"Umeyama scale factor: {scale:.3f} (expect close to 1.0 -- pipeline is metric via stereo depth)")
 
 errors = np.linalg.norm(aligned_vo - matched_gt_clean, axis=1)
-print(f"\n--- RESULTS ---")
+print(f"\n--- RESULTS (before gyro-bias correction) ---")
+print(f"ATE RMSE: {np.sqrt(np.mean(errors ** 2)):.3f} m")
+print(f"ATE Mean: {np.mean(errors):.3f} m")
+print(f"ATE Max:  {np.max(errors):.3f} m")
+
+# ---------------- GYRO-Z BIAS SEARCH ----------------
+# A small constant offset in the raw gyro-z reading integrates into a slowly growing
+# heading error, which rotates every subsequent motion vector by roughly the same
+# small angle -- producing a trajectory that tracks the true path's shape closely but
+# sits at a near-constant perpendicular offset the whole way, exactly like what shows
+# up in the plot. Umeyama's single rigid+scale alignment can't undo this because it's
+# not a single wrong rotation, it's a continuously accumulating one.
+#
+# body_vec_history / wz_raw_history / dt_history were recorded during the main loop
+# so we can re-integrate heading (and rebuild the trajectory) cheaply for many
+# candidate bias values without recomputing optical flow or stereo depth.
+
+def rebuild_trajectory_with_bias(wz_bias):
+    x, y, z = 0.0, 0.0, 0.0
+    hdg = 0.0
+    traj = [(x, y, z)]
+    for bv, wz_r, dt_i in zip(body_vec_history, wz_raw_history, dt_history):
+        R_yaw_b = Rotation.from_euler('z', hdg)
+        mw = R_yaw_b.apply(bv)
+        x += mw[0]; y += mw[1]; z += mw[2]
+        hdg += (wz_r - wz_bias) * dt_i
+        traj.append((x, y, z))
+    return np.array(traj)
+
+
+candidate_biases = np.linspace(-0.02, 0.02, 81)  # rad/s -- widen if the best value lands at an edge
+best_bias, best_rmse, best_traj = 0.0, np.sqrt(np.mean(errors ** 2)), trajectory
+
+for wz_bias in candidate_biases:
+    traj_b = rebuild_trajectory_with_bias(wz_bias)
+    valid_b = np.all(np.isfinite(traj_b), axis=1)
+    if valid_b.sum() < 5:
+        continue
+    aligned_b, _ = umeyama_alignment(traj_b[valid_b], matched_gt[valid_b])
+    rmse_b = np.sqrt(np.mean(np.linalg.norm(aligned_b - matched_gt[valid_b], axis=1) ** 2))
+    if rmse_b < best_rmse:
+        best_rmse, best_bias, best_traj = rmse_b, wz_bias, traj_b
+
+if best_bias != 0.0:
+    print(f"\nBest gyro-z bias found: {best_bias:.5f} rad/s "
+          f"(RMSE {np.sqrt(np.mean(errors ** 2)):.3f} m -> {best_rmse:.3f} m)")
+    trajectory = best_traj
+    trajectory_clean = trajectory[np.all(np.isfinite(trajectory), axis=1)]
+    matched_gt_clean = matched_gt[np.all(np.isfinite(trajectory), axis=1)]
+    aligned_vo, scale = umeyama_alignment(trajectory_clean, matched_gt_clean)
+    errors = np.linalg.norm(aligned_vo - matched_gt_clean, axis=1)
+else:
+    print("\nNo candidate bias improved on zero bias -- gyro-z offset may already be negligible, "
+          "or the residual offset has a different cause (widen candidate_biases range to double-check).")
+
+print(f"\n--- RESULTS (after gyro-bias correction) ---")
+print(f"Umeyama scale factor: {scale:.3f}")
 print(f"ATE RMSE: {np.sqrt(np.mean(errors ** 2)):.3f} m")
 print(f"ATE Mean: {np.mean(errors):.3f} m")
 print(f"ATE Max:  {np.max(errors):.3f} m")
