@@ -4,24 +4,7 @@ import numpy as np
 
 def solve_camera_velocity(flow, x_norm, y_norm, fx, fy, wx, wy, wz, Z_map, subsample=8,
                            ransac_iters=200, ransac_thresh_px=2.0, min_inliers=10, rng=None):
-    """
-    flow: (H, W, 2) raw pixel optical flow between two frames
-    x_norm, y_norm: (H, W) normalized pixel coordinate grids, precomputed once
-    fx, fy: focal lengths (pixels)
-    wx, wy, wz: angular displacement IN CAMERA FRAME, already scaled to rad/frame (w * dt)
-    Z_map: (H, W) per-pixel depth in meters, NaN where invalid
-    subsample: pixel stride to reduce point count for speed
-    ransac_iters: number of RANSAC hypothesis trials
-    ransac_thresh_px: inlier threshold, expressed in pixels (converted internally to
-                       normalized-flow-error units via fx) -- how far a point's residual
-                       flow can be from the fitted model and still count as an inlier
-    min_inliers: minimum consensus set size to accept the RANSAC result
-    rng: optional np.random.Generator for reproducibility; a fresh one is created if None
 
-    Returns: np.array([Vx, Vy, Vz]) -- per-frame translational displacement in camera frame.
-             Returns [0, 0, 0] if too few valid depth points, or no RANSAC hypothesis reaches
-             min_inliers, are available this frame.
-    """ 
     ys = np.arange(0, flow.shape[0], subsample)
     xs = np.arange(0, flow.shape[1], subsample)
 
