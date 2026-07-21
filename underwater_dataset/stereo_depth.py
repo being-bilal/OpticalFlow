@@ -5,7 +5,6 @@ import yaml
 
 
 def load_stereo_setup(intrinsics_path):
-    """Call once at startup. Returns everything needed for get_depth()."""
     with open(intrinsics_path) as f:
         calib = yaml.safe_load(f)
 
