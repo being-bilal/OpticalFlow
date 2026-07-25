@@ -13,14 +13,8 @@ def solve_camera_velocity(flow, x_norm, y_norm, fx, fy, wx, wy, wz, Z_map, subsa
     x = x_norm[np.ix_(ys, xs)]
     y = y_norm[np.ix_(ys, xs)]
     Z = Z_map[np.ix_(ys, xs)]
-
     u_n = u_px / fx
     v_n = v_px / fy
-
-    # Rotational flow component (per-pixel, depends only on angular motion + pixel position)
-    # Standard Longuet-Higgins & Prazdny motion field model:
-    #   u_rot =  x*y*wx - (1+x^2)*wy + y*wz
-    #   v_rot =  (1+y^2)*wx - x*y*wy - x*wz
     u_r = x * y * wx - (1 + x ** 2) * wy + y * wz
     v_r = (1 + y ** 2) * wx - x * y * wy - x * wz
 
@@ -51,15 +45,6 @@ def solve_camera_velocity(flow, x_norm, y_norm, fx, fy, wx, wy, wz, Z_map, subsa
     A[1::2, 2] = y_flat
     b[1::2] = v_t * Z_flat
 
-    # ---- RANSAC outlier rejection ----
-    # Fit the SAME physical model (translation-only flow given known depth) that the
-    # final least-squares solve uses, rather than a generic 2D affine/homography motion
-    # model -- a translating camera's flow field isn't globally affine (it depends on
-    # per-pixel depth via 1/Z and has a projective x*Vz / y*Vz term), so a generic affine
-    # RANSAC would reject good points and keep bad ones. Each point contributes 2 rows to
-    # A/b; 2 points give 4 equations for the 3 unknowns (Vx, Vy, Vz), which is enough to
-    # be well-determined for most point configurations, so we sample minimal sets of 2
-    # points per hypothesis.
     if rng is None:
         rng = np.random.default_rng()
 
