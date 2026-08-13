@@ -1,6 +1,6 @@
-# main.py
-# Testing Optical Flow (Stereo-Depth-Based Camera Motion) on NTNU-ARL underwater dataset
 # https://huggingface.co/datasets/ntnu-arl/underwater-datasets
+
+from turtle import backward, forward, up
 
 import cv2
 import numpy as np
@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 from stereo_depth import load_stereo_setup, get_depth
 from velocity_calculation import solve_camera_velocity
 
-# ---------------- CONFIG ----------------
 BAG_PATH = Path("dataset/mclab.bag")
 GT_PATH = Path("dataset/mclab.tum")
 INTRINSICS_WATER = Path("dataset/camchain-stereo-intrinsics-underwater.yaml")
@@ -24,35 +23,31 @@ CAM1_TOPIC = "/alphasense_driver_ros/cam1"
 IMU_TOPIC = "/alphasense_driver_ros/imu"
 
 SUBSAMPLE = 8          # pixel stride for velocity least-squares solve (speed vs accuracy tradeoff)
-START_FRAME = 2000     # set both to None to run the full sequence
-END_FRAME = 3500       # slice is [START_FRAME:END_FRAME), matches Python slicing
-Z_MIN = 0.1            # meters -- plausible minimum floor/scene distance
-Z_MAX = 3.0            # meters -- plausible maximum floor/scene distance for this pool/tank
+START_FRAME = 2000     
+END_FRAME = 3500       
+Z_MIN = 0.1            # min floor distance
+Z_MAX = 3.0            # max distance for this tank
 
 CAM_TILT_DEG = 16.0    # cam0 is mounted tilted this many degrees downward from horizontal
-                       # (per NTNU-ARL MC-lab rig docs). If z_pos still drifts steadily in
-                       # one direction after this fix, flip the sign here and re-check.
 CAM_TILT_RAD = np.radians(CAM_TILT_DEG)
 
-# ---------------- CALIBRATION ----------------
+
 with open(INTRINSICS_WATER) as f:
     calib = yaml.safe_load(f)
 fx, fy, cx, cy = calib['cam0']['intrinsics']
 
 with open(EXTRINSICS_AIR) as f:
     extrinsics_air = yaml.safe_load(f)
-R_cam_imu = np.array(extrinsics_air['cam0']['T_cam_imu'])[:3, :3]  # IMU -> camera rotation
+R_cam_imu = np.array(extrinsics_air['cam0']['T_cam_imu'])[:3, :3]  
 
 stereo_setup = load_stereo_setup(str(INTRINSICS_WATER))
 
-# contrast enhancement -- underwater frames are low-contrast, which starves Farneback of gradient info
 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
-# ---------------- EXTRACT FROM BAG ----------------
+# Extract bag contents into memory (images, timestamps, IMU)
 images0, images1 = [], []
 image_ts0, image_ts1 = [], []
 imu_records = []
-
 print("Extracting bag contents...")
 with AnyReader([BAG_PATH]) as reader:
     cam0_conns = [c for c in reader.connections if c.topic == CAM0_TOPIC]
@@ -71,10 +66,9 @@ with AnyReader([BAG_PATH]) as reader:
 
     for conn, ts, raw in reader.messages(connections=imu_conns):
         msg = reader.deserialize(raw, conn.msgtype)
-        # NOTE: orientation field on this topic is invalid (zero quaternion, raw IMU, no fusion).
-        # Only angular_velocity is used -- heading is integrated manually in the main loop.
         imu_records.append([ts / 1e9,
                              msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z])
+
 
 image_ts0 = np.array(image_ts0)
 image_ts1 = np.array(image_ts1)
@@ -84,40 +78,37 @@ print(f"Extracted: cam0={len(images0)}, cam1={len(images1)}, IMU={len(imu_record
 if START_FRAME is not None or END_FRAME is not None:
     images0 = images0[START_FRAME:END_FRAME]
     image_ts0 = image_ts0[START_FRAME:END_FRAME]
-    print(f"Using frame window [{START_FRAME}:{END_FRAME}] -- {len(images0)} cam0 frames")
+    print(f"Using frame window [{START_FRAME}:{END_FRAME}] -> {len(images0)} frames")
 
-# Match cam1 frames to cam0 by nearest timestamp (counts can differ slightly)
+# Match cam1 frames to cam0 by nearest timestamp 
 cam1_match_idx = np.array([np.argmin(np.abs(image_ts1 - t)) for t in image_ts0])
 
-# ---------------- NORMALIZED PIXEL GRID (built once, reused every frame) ----------------
 h, w = images0[0].shape
 ys, xs = np.mgrid[0:h, 0:w]
 x_norm = (xs - cx) / fx
 y_norm = (ys - cy) / fy
 
-# ---------------- MAIN VO LOOP ----------------
+
 x_pos, y_pos, z_pos = 0.0, 0.0, 0.0
-heading = 0.0  # gyro-integrated yaw (radians)
+heading = 0.0  
 trajectory = [(x_pos, y_pos, z_pos)]
 vo_timestamps = [image_ts0[0]]
 nan_frame_count = 0
 
-# Recorded so we can cheaply re-integrate heading with different gyro-z bias
-# candidates afterward, without recomputing optical flow / stereo depth again.
+
 body_vec_history = []   # [level_fwd, Vx, level_down] per frame
 wz_raw_history = []     # raw gyro-z reading used at each frame
 dt_history = []
 
-print("Computing initial stereo depth...")
+# Get initial depth
 rect0_prev, Z_prev = get_depth(images0[0], images1[cam1_match_idx[0]], stereo_setup, Z_MIN, Z_MAX)
 rect0_prev = clahe.apply(rect0_prev)
 
 N = len(images0)
-print(f"Running VO loop over {N - 1} frame pairs...")
-
 for i in range(1, N):
     dt = image_ts0[i] - image_ts0[i - 1]
-
+    
+    # Determining the depth using stereo cams and getting the rectified image for optical flow
     rect0_curr, Z_curr = get_depth(images0[i], images1[cam1_match_idx[i]], stereo_setup, Z_MIN, Z_MAX)
     rect0_curr = clahe.apply(rect0_curr)
 
@@ -129,7 +120,7 @@ for i in range(1, N):
     wx_raw, wy_raw, wz_raw = w_imu
 
     w_cam = R_cam_imu @ w_imu       # rotate IMU angular velocity into camera frame
-    wx, wy, wz = w_cam * dt         # rad/s -> rad/frame
+    wx, wy, wz = w_cam * dt         # rad/s -> rad/frame (rotation per frame)
 
     (Vx, Vy, Vz), n_valid = solve_camera_velocity(flow, x_norm, y_norm, fx, fy, wx, wy, wz,
                                                    Z_prev, subsample=SUBSAMPLE)
@@ -139,25 +130,11 @@ for i in range(1, N):
         Vx, Vy, Vz = 0.0, 0.0, 0.0
         nan_frame_count += 1
 
-    # ---- Undo the fixed ~16 deg downward mount tilt ----
-    # Without this, part of the AUV's true forward motion (Vz) leaks into the
-    # down axis (Vy) and vice versa, since the camera boresight isn't level
-    # with the vehicle's horizontal plane. This is what was producing the
-    # steady negative Vy bias and the multi-meter phantom z_pos drift.
     level_fwd = Vz * np.cos(CAM_TILT_RAD) - Vy * np.sin(CAM_TILT_RAD)
     level_down = Vz * np.sin(CAM_TILT_RAD) + Vy * np.cos(CAM_TILT_RAD)
 
     # ---- Remap camera-optical axes into a body vector before applying yaw ----
-    # Camera convention here is x-right, y-down, z-forward (standard pinhole/optical frame).
-    # cam0 is the front-facing stereo pair, so (leveled) Vz is the *forward* component --
-    # the dominant AUV translation -- while Vx is lateral and (leveled) Vy is vertical.
-    # Rotation.from_euler('z', heading) mixes indices 0 and 1 of whatever vector it's given,
-    # so passing [Vx, Vy, Vz] directly (as before) rotated the small Vx/Vy pair together
-    # and dumped the dominant forward motion Vz straight into z_pos, untouched -- it never
-    # reached the horizontal (x_pos, y_pos) trajectory that gets plotted.
-    # Building body_vec = [forward, right, down] and rotating THAT by yaw puts the
-    # dominant forward motion into the horizontal plane where it belongs.
-    body_vec = np.array([level_fwd, Vx, level_down])   # [forward, right, down]
+    body_vec = np.array([level_fwd, Vx, level_down])   
 
     R_yaw = Rotation.from_euler('z', heading)
     motion_world = R_yaw.apply(body_vec)   # .apply() is the version-safe way to rotate a
@@ -173,8 +150,7 @@ for i in range(1, N):
     y_pos += motion_world[1]
     z_pos += motion_world[2]
 
-    heading += wz_raw * dt          # gyro-integrated yaw (orientation field was invalid)
-
+    heading += wz_raw * dt  
     trajectory.append((x_pos, y_pos, z_pos))
     vo_timestamps.append(image_ts0[i])
 
@@ -196,25 +172,19 @@ trajectory = np.array(trajectory)
 vo_timestamps = np.array(vo_timestamps)
 print(f"Final VO position: {trajectory[-1]}")
 
-# ---------------- LOAD GROUND TRUTH ----------------
+
 gt_data = np.loadtxt(GT_PATH)
 gt_timestamps = gt_data[:, 0]
 gt_positions = gt_data[:, 1:4]
-
 matched_gt = np.array([gt_positions[np.argmin(np.abs(gt_timestamps - ts))] for ts in vo_timestamps])
 
-# ---------------- FILTER ANY REMAINING NON-FINITE ROWS (safety net) ----------------
 valid_traj = np.all(np.isfinite(trajectory), axis=1)
 print(f"Valid trajectory points: {valid_traj.sum()} / {len(trajectory)}")
 
 trajectory_clean = trajectory[valid_traj]
 matched_gt_clean = matched_gt[valid_traj]
 
-if len(trajectory_clean) < 5:
-    raise RuntimeError("Too few valid trajectory points to align -- check Z_MIN/Z_MAX bounds "
-                        "and stereo matching quality before proceeding.")
-
-# ---------------- ALIGN (Umeyama: rotation + translation + scale) ----------------
+# using Umeyama's method to align the VO trajectory to the GT trajectory (rigid + scale)
 def umeyama_alignment(source, target):
     mu_src, mu_tgt = source.mean(axis=0), target.mean(axis=0)
     src_c, tgt_c = source - mu_src, target - mu_tgt

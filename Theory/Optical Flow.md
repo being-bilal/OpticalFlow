@@ -40,7 +40,7 @@ Farneback assumes that within this small region, the brightness varies smoothly 
 $$f(x,y)=ax2+bxy+cy2+dx+ey+f$$
 this turns the neighbourhood into a curved surface. Because real images contain noise and motion is not perfectly uniform, Farneback does not rely on a single pixel. Instead, it combines information from neighbouring pixels using weighted averaging and least-squares optimisation.
 
-The algorithm also employs a **Gaussian pyramid**, which is a set of progressively smaller versions of the image. The algorithm also employs a **Gaussian pyramid**, which is a set of progressively smaller versions of the image. In OpenCV it is implemented as : 
+The algorithm also employs a **Gaussian pyramid**, which is a set of progressively smaller versions of the image. In OpenCV it is implemented as : 
 
 ````
 flow = cv2.calcOpticalFlowFarneback(
@@ -104,11 +104,49 @@ $$f0​(x,y)=(0,0)$$
 ---
 ## Optical Flow For Global Camera Motion
 **To Determine** :
-When the camera it has rotation $R$ about its center and translation $T$ of its center, Optical flow cannot directly determine the motion of the camera but can used along with IMU and depth sensor to calculate the value of $R$ and $T$ to determine the motion of the camera. The motion of the point in space depends upon its distance/depth from the camera as the points nearby the camera moves faster than the point far away. 
+When the camera has rotation $R$ about its center and translation $T$ of its center, Optical flow cannot directly determine the motion of the camera but can used along with IMU and depth sensor to calculate the value of $R$ and $T$ to determine the motion of the camera. The motion of the point in space depends upon its distance/depth from the camera as the points nearby the camera moves faster than the point far away. 
 
 Assume a 3D point: 
 $P= \begin{bmatrix} X\\Y\\Z \end{bmatrix}​​$
 It is projected on the camera screen as : 
 $y=f\frac{Y}{Z} , x=f\frac{X}{Z}$
-where, $f$ is the focal length of the camera (intrinsic property of the camera) and $Z$ is the depth. Therefore the projection of the point on the camera screen depend on depth and focal point of the camera.
+where, $f$ is the focal length of the camera (intrinsic property of the camera) and $Z$ is the depth. Therefore the projection of the point on the camera screen depend on depth and focal point of the camera. The displacement observed by the camera is the sum of two components: 
+* Rotational flow : it is unaffected by the depth and can be directly measured by the anular velocity from the IMU.
+* Translational flow : Caused by the camera moving through space. This _does_ depend on the distance to the floor.
+$$
+u = \dot{x}
+= \frac{Z\dot{X} - X\dot{Z}}{Z^2}
+= \frac{\dot{X} - x\dot{Z}}{Z}
+$$
 
+$$
+v = \dot{y}
+= \frac{Z\dot{Y} - Y\dot{Z}}{Z^2}
+= \frac{\dot{Y} - y\dot{Z}}{Z}
+$$
+By subtracting the rotational flow from your total optical flow, you are left with pure translational displacement. Then the process of determining the motion of the camera using optical flow can be done as follows : 
+
+#### Pixel to Camera Coordinate
+The first step is to convert the pixel coordinate of the point to the camera coordinates (coordinate on the image screen), this can be done by using the camera intrinsic parameters (Fx, Fy, Cx, Cy) : $$x=\frac{x​−cx​​}{fx​}, y=\frac{y​−cy​​}{fy}$$
+Do the same to scale your optical flow vectors (u,v) determined using optical flow into normalized units.
+
+#### De-rotate the Optical Flow (Using the IMU)
+Now that we have determined the coordinate of the pixels and displacement in the camera coordinate we can determine the displacement of the point due to rotation using the angular velocity (wx, wy, wz) given by the IMU. It can be determined as follows:
+$$
+u_R = -xy\,\omega_x + (1+x^2)\,\omega_y - y\,\omega_z
+$$
+
+$$
+v_R = -(1+y^2)\,\omega_x + xy\,\omega_y + x\,\omega_z
+$$
+Then, by subtracting the rotational displacement from the total displacement, we get the purely translational displacement of the point : 
+$$u_t = u - u_r$$$$v_t = v - v_r$$
+#### Solve for Camera Velocity (Using Depth) 
+Now you are left with pure translation. The relationship between translational optical flow, your camera's 3D velocity (Vx​,Vy​,Vz​), and the distance to the pool floor (Z) is: 
+$$
+u_T = \frac{-V_x + xV_z}{Z}
+$$
+
+$$
+v_T = \frac{-V_y + yV_z}{Z}
+$$

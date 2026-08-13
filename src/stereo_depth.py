@@ -1,8 +1,13 @@
-# stereo_depth.py
 import cv2
 import numpy as np
 import yaml
 
+# Determining the depth using stereo cams
+    # X_r = X*f/Z
+    # X_l = (X_r - b)*f/Z
+    # disparity (d) = X_r - X_l 
+    # d = b*f/Z (b = baseline, f = focal length, Z = depth)
+    # Z = b*f/d
 
 def load_stereo_setup(intrinsics_path):
     with open(intrinsics_path) as f:
@@ -51,12 +56,6 @@ def load_stereo_setup(intrinsics_path):
 
 
 def get_depth(img0, img1, setup, z_min=0.1, z_max=3.0):
-    """
-    img0, img1: raw grayscale images from cam0, cam1 (same timestamp)
-    setup: dict returned by load_stereo_setup()
-    z_min, z_max: plausible depth bounds (meters) -- anything outside is set to NaN
-    Returns: Z (H, W) depth map in meters (NaN where invalid), rect0 (rectified cam0 image)
-    """
     rect0 = cv2.remap(img0, setup['map0x'], setup['map0y'], cv2.INTER_LINEAR)
     rect1 = cv2.remap(img1, setup['map1x'], setup['map1y'], cv2.INTER_LINEAR)
 
