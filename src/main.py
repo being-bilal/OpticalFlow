@@ -118,7 +118,6 @@ for i in range(1, N):
     imu_idx = np.argmin(np.abs(imu_records[:, 0] - image_ts0[i - 1]))
     w_imu = imu_records[imu_idx, 1:4]
     wx_raw, wy_raw, wz_raw = w_imu
-
     w_cam = R_cam_imu @ w_imu       # rotate IMU angular velocity into camera frame
     wx, wy, wz = w_cam * dt         # rad/s -> rad/frame (rotation per frame)
 
@@ -127,7 +126,7 @@ for i in range(1, N):
 
     if not np.all(np.isfinite([Vx, Vy, Vz])):
         print(f"WARNING: Frame {i} produced non-finite velocity -- treating as zero motion")
-        Vx, Vy, Vz = 0.0, 0.0, 0.0
+        Vx, Vy, Vz = 0.0, 0.0, 0.0 
         nan_frame_count += 1
 
     level_fwd = Vz * np.cos(CAM_TILT_RAD) - Vy * np.sin(CAM_TILT_RAD)
@@ -255,6 +254,7 @@ if best_bias != 0.0:
     matched_gt_clean = matched_gt[np.all(np.isfinite(trajectory), axis=1)]
     aligned_vo, scale = umeyama_alignment(trajectory_clean, matched_gt_clean)
     errors = np.linalg.norm(aligned_vo - matched_gt_clean, axis=1)
+    
 else:
     print("\nNo candidate bias improved on zero bias -- gyro-z offset may already be negligible, "
           "or the residual offset has a different cause (widen candidate_biases range to double-check).")
@@ -265,9 +265,8 @@ print(f"ATE RMSE: {np.sqrt(np.mean(errors ** 2)):.3f} m")
 print(f"ATE Mean: {np.mean(errors):.3f} m")
 print(f"ATE Max:  {np.max(errors):.3f} m")
 
-# ---------------- PLOT ----------------
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 axes[0].plot(matched_gt_clean[:, 0], matched_gt_clean[:, 1], 'g-', linewidth=1.5, label='Ground Truth')
 axes[0].plot(aligned_vo[:, 0], aligned_vo[:, 1], 'r--', linewidth=1.2, label='Optical Flow VO')
 axes[0].scatter(matched_gt_clean[0, 0], matched_gt_clean[0, 1], c='blue', s=80, marker='o', label='Start', zorder=5)
