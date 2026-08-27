@@ -2,7 +2,6 @@
 
 File.version: "1.0"
 
-# Camera Parameters : Extracted from simulation .scn file
 Camera.type: "PinHole"
 
 Camera1.fx: 762.722
@@ -20,13 +19,11 @@ Camera.height: 720
 Camera.fps: 5.64
 Camera.RGB: 1
 
-
 ORBextractor.nFeatures: 1500
 ORBextractor.scaleFactor: 1.2
 ORBextractor.nLevels: 8
 ORBextractor.iniThFAST: 12
 ORBextractor.minThFAST: 5
-
 
 IMU.NoiseGyro: 1.0e-03
 IMU.NoiseAcc: 2.0e-02
@@ -34,16 +31,14 @@ IMU.GyroWalk: 1.0e-04
 IMU.AccWalk: 2.0e-03
 IMU.Frequency: 94.6
 
-
 IMU.T_b_c1: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
   data: [0.0, 0.0, 1.0, 0.32,
         -1.0, 0.0, 0.0, 0.0,
-         0.0, -1.0, 0.0, 0.0,
+         0.0, 1.0, 0.0, 0.0,
          0.0, 0.0, 0.0, 1.0]
-
 
 Viewer.KeyFrameSize: 0.05
 Viewer.KeyFrameLineWidth: 1
@@ -55,3 +50,4 @@ Viewer.ViewpointX: 0
 Viewer.ViewpointY: -0.7
 Viewer.ViewpointZ: -3.5
 Viewer.ViewpointF: 500
+EOF

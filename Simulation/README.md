@@ -1,1 +1,57 @@
 Running ORB SLAM 3 on monocular front camera and imu of the auv, using stonefish simulation data.
+cat > SAUVC_front.yaml << 'EOF'
+%YAML:1.0
+
+File.version: "1.0"
+
+Camera.type: "PinHole"
+
+Camera1.fx: 762.722
+Camera1.fy: 762.722
+Camera1.cx: 640.000
+Camera1.cy: 360.000
+
+Camera1.k1: 0.0
+Camera1.k2: 0.0
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+
+Camera.width: 1280
+Camera.height: 720
+Camera.fps: 5.64
+Camera.RGB: 1
+
+ORBextractor.nFeatures: 1500
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 12
+ORBextractor.minThFAST: 5
+
+IMU.NoiseGyro: 1.0e-03
+IMU.NoiseAcc: 2.0e-02
+IMU.GyroWalk: 1.0e-04
+IMU.AccWalk: 2.0e-03
+IMU.Frequency: 94.6
+
+# CORRECTED: Flipped Z-axis to match IMU gravity (+9.81 -> ORB-SLAM3 expects -9.81)
+# This is T_b_c1 (camera to body) with body Z pointing down to match your IMU data
+IMU.T_b_c1: !!opencv-matrix
+  rows: 4
+  cols: 4
+  dt: f
+  data: [0.0, 0.0, 1.0, 0.32,
+        -1.0, 0.0, 0.0, 0.0,
+         0.0, 1.0, 0.0, 0.0,
+         0.0, 0.0, 0.0, 1.0]
+
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3
+Viewer.ViewpointX: 0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -3.5
+Viewer.ViewpointF: 500
+EOF

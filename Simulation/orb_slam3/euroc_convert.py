@@ -1,89 +1,54 @@
-#!/usr/bin/env python3
-"""euroc_convert.py — repackage a sauvc_traj_recorder trajectory folder into the EuRoC/ASL
-layout that ros2_orb_slam3's mono_driver_node.py expects.
-
-WHY THIS IS NEEDED
--------------------
-trajectory_recorder_node.py writes images as camera_front/000000_<t>.png plus a separate
-camera_front_index.csv (idx, sec, nanosec, t, filename). mono_driver_node.py's
-get_image_dataset_asl() instead expects a bare directory of images named
-<timestamp_ns>.png — it derives the per-frame ROS timestep by doing
-float(filename.split('.')[0]), i.e. the ENTIRE filename stem must be one integer
-nanosecond timestamp (exactly like the EuRoC dataset: 1403638538577829376.png).
-
-This script copies (not moves) images from the recorder's output into that layout using
-the sec/nanosec columns already in the index CSV (exact integers — safer than
-reparsing the rounded 't' float column). It does not touch your original recording.
-
-USAGE
-    python3 euroc_convert.py /path/to/trajectory_03 my_seq_name \\
-        --dataset-root ~/Robotics_Job/sauvc_ws/src/ros2_orb_slam3/TEST_DATASET \\
-        --cam camera_front
-
-This produces:
-    TEST_DATASET/my_seq_name/mav0/cam0/data/<t_ns>.png
-    TEST_DATASET/my_seq_name/mav0/cam0/data.csv        (EuRoC-style index, not required by
-                                                          mono_driver_node.py but standard)
-
-Then run:
-    ros2 run ros2_orb_slam3 mono_driver_node.py --ros-args \\
-        -p settings_name:=<your_settings_yaml_stem> -p image_seq:=my_seq_name
-"""
-
-import argparse
-import csv
+import pandas as pd
+import numpy as np
 import os
 import shutil
 
+ROOT = "."
+OUT = "./mav0"
+os.makedirs(f"{OUT}/cam0/data", exist_ok=True)
+os.makedirs(f"{OUT}/imu0", exist_ok=True)
 
-def convert(traj_dir, seq_name, dataset_root, cam):
-    index_csv = os.path.join(traj_dir, f'{cam}_index.csv')
-    src_dir = os.path.join(traj_dir, cam)
-    if not os.path.isfile(index_csv):
-        raise SystemExit(f'{index_csv} not found — did you record {cam}_topic in this take?')
+# --- Camera ---
+cam = pd.read_csv(f"{ROOT}/camera_front_index.csv")
+cam['t_ns'] = (cam['t'] * 1e9).astype(np.int64)
 
-    out_dir = os.path.join(dataset_root, seq_name, 'mav0', 'cam0', 'data')
-    os.makedirs(out_dir, exist_ok=True)
-
-    rows = []
-    with open(index_csv, newline='') as f:
-        for r in csv.DictReader(f):
-            t_ns = int(r['sec']) * 1_000_000_000 + int(r['nanosec'])
-            rows.append((t_ns, r['filename']))
-    rows.sort(key=lambda row: row[0])
-
-    data_csv_path = os.path.join(dataset_root, seq_name, 'mav0', 'cam0', 'data.csv')
-    with open(data_csv_path, 'w', newline='') as out_f:
-        writer = csv.writer(out_f)
-        writer.writerow(['#timestamp [ns]', 'filename'])
-        for t_ns, filename in rows:
-            src = os.path.join(src_dir, filename)
-            if not os.path.isfile(src):
-                print(f'  WARNING: {src} listed in index but missing on disk, skipping')
-                continue
-            dst = os.path.join(out_dir, f'{t_ns}.png')
+with open(f"{OUT}/cam0/data.csv", 'w') as f:
+    f.write("#timestamp [ns],filename\n")
+    for _, row in cam.iterrows():
+        ts = row['t_ns']
+        src = f"{ROOT}/camera_front/{row['filename']}"
+        dst = f"{OUT}/cam0/data/{ts}.png"
+        if os.path.exists(src):
             shutil.copy2(src, dst)
-            writer.writerow([t_ns, f'{t_ns}.png'])
+            f.write(f"{ts},{ts}.png\n")
 
-    print(f'wrote {len(rows)} frames -> {out_dir}')
-    print(f'wrote index -> {data_csv_path}')
-    print(f'\nrun with: -p image_seq:={seq_name}')
+# --- IMU ---
+imu = pd.read_csv(f"{ROOT}/imu.csv")
+imu['t_ns'] = (imu['t'] * 1e9).astype(np.int64)
 
+# Trim to camera overlap window
+c0, c1 = cam['t_ns'].min(), cam['t_ns'].max()
+imu = imu[(imu['t_ns'] >= c0) & (imu['t_ns'] <= c1)]
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('traj_dir', help='sauvc_traj_recorder trajectory folder, e.g. trajectory_03')
-    ap.add_argument('seq_name', help='name for this sequence under ros2_orb_slam3/TEST_DATASET')
-    ap.add_argument('--dataset-root', required=True,
-                    help='path to ros2_orb_slam3/TEST_DATASET on this machine')
-    ap.add_argument('--cam', default='camera_front', choices=['camera_front', 'camera_down'],
-                    help='which recorded camera stream to convert (default: camera_front)')
-    args = ap.parse_args()
+# Use exact column names from your CSV: wx, wy, wz, ax, ay, az
+imu[['t_ns', 'wx', 'wy', 'wz', 'ax', 'ay', 'az']].to_csv(
+    f"{OUT}/imu0/data.csv", index=False,
+    header=["#timestamp [ns]", "w_x [rad/s]", "w_y [rad/s]", "w_z [rad/s]",
+            "a_x [m/s^2]", "a_y [m/s^2]", "a_z [m/s^2]"])
 
-    dataset_root = os.path.expanduser(args.dataset_root)
-    convert(os.path.expanduser(args.traj_dir), args.seq_name, dataset_root, args.cam)
+# --- Ground Truth (optional) ---
+gt = pd.read_csv(f"{ROOT}/ground_truth.csv")
+gt['t_ns'] = (gt['t'] * 1e9).astype(np.int64)
+gt = gt[(gt['t_ns'] >= c0) & (gt['t_ns'] <= c1)]
+os.makedirs(f"{OUT}/state_groundtruth_estimate0", exist_ok=True)
+gt[['t_ns', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']].to_csv(
+    f"{OUT}/state_groundtruth_estimate0/data.csv", index=False,
+    header=["#timestamp [ns]", "p_x", "p_y", "p_z", "q_w", "q_x", "q_y", "q_z"])
 
+# --- timestamps.txt ---
+cam['t_ns'].to_csv(f"{ROOT}/timestamps.txt", index=False, header=False)
 
-if __name__ == '__main__':
-    main()
+print("Done. mav0/ structure created.")
+print(f"Camera frames: {len(cam)}")
+print(f"IMU samples:   {len(imu)}")
+print(f"Ground truth:  {len(gt)}")
