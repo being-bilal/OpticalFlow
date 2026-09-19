@@ -1,57 +1,47 @@
-Running ORB SLAM 3 on monocular front camera and imu of the auv, using stonefish simulation data.
-cat > SAUVC_front.yaml << 'EOF'
-%YAML:1.0
+# VIO Benchmark
 
-File.version: "1.0"
+Runs visual-inertial odometry pipelines on a Simulation dataset and compares trajectories
 
-Camera.type: "PinHole"
+## Dataset
+(https://drive.google.com/drive/folders/18MMPc_2qB2OM7NqWjYV7AMxNkOy_e5Ol?usp=sharing)
 
-Camera1.fx: 762.722
-Camera1.fy: 762.722
-Camera1.cx: 640.000
-Camera1.cy: 360.000
+Extract to `data/` directory.
 
-Camera1.k1: 0.0
-Camera1.k2: 0.0
-Camera1.p1: 0.0
-Camera1.p2: 0.0
+## Setup
 
-Camera.width: 1280
-Camera.height: 720
-Camera.fps: 5.64
-Camera.RGB: 1
+### ORB-SLAM Monocular
+```bash
+cd orb_slam3
+./build.sh
+./Examples/Monocular/mono_euroc Vocabulary/ORBvoc.txt Examples/Monocular/EuRoC.yaml ../data/dataset trajectory.tum
+```
 
-ORBextractor.nFeatures: 1500
-ORBextractor.scaleFactor: 1.2
-ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 12
-ORBextractor.minThFAST: 5
+### ORB-SLAM3 Monocular-Inertial
+```bash
+cd orb_slam3
+./build.sh
+./Examples/Monocular-Inertial/mono_inertial_euroc Vocabulary/ORBvoc.txt Examples/Monocular-Inertial/EuRoC.yaml ../data/dataset trajectory.tum
+```
 
-IMU.NoiseGyro: 1.0e-03
-IMU.NoiseAcc: 2.0e-02
-IMU.GyroWalk: 1.0e-04
-IMU.AccWalk: 2.0e-03
-IMU.Frequency: 94.6
+### VINS-Fusion
+```bash
+cd VINS-Fusion
+catkin build
+roslaunch vins_estimator euroc.launch
+# In another terminal:
+rosbag play ../data/dataset.bag
+```
+Results saved to `~/.ros/vins_result/`.
 
-# CORRECTED: Flipped Z-axis to match IMU gravity (+9.81 -> ORB-SLAM3 expects -9.81)
-# This is T_b_c1 (camera to body) with body Z pointing down to match your IMU data
-IMU.T_b_c1: !!opencv-matrix
-  rows: 4
-  cols: 4
-  dt: f
-  data: [0.0, 0.0, 1.0, 0.32,
-        -1.0, 0.0, 0.0, 0.0,
-         0.0, 1.0, 0.0, 0.0,
-         0.0, 0.0, 0.0, 1.0]
+## Results
 
-Viewer.KeyFrameSize: 0.05
-Viewer.KeyFrameLineWidth: 1
-Viewer.GraphLineWidth: 0.9
-Viewer.PointSize: 2
-Viewer.CameraSize: 0.08
-Viewer.CameraLineWidth: 3
-Viewer.ViewpointX: 0
-Viewer.ViewpointY: -0.7
-Viewer.ViewpointZ: -3.5
-Viewer.ViewpointF: 500
-EOF
+All trajectories saved in `results/`:
+- `results/ORB-SLAM`
+- `results/VINS-FUSION`
+- `results/eval`
+
+## Evaluate
+
+```bash
+python3 align_and_evaluate.py data/gt.tum results/vins_fusion.tum --align-scale --plot
+```
