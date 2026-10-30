@@ -28,4 +28,4 @@ def txt_to_tum(in_path, out_path):
 
 
 if __name__ == '__main__':
-    txt_to_tum('/Users/mohammadbilal/Documents/Projects/OpticalFlow/Simulation/orb_slam3/results/KeyFrameTrajectory.txt', 'orb_inertial.tum')
+    txt_to_tum('/Users/mohammadbilal/Documents/Projects/OpticalFlow/Simulation/results/GroundSLAM/optimized_keyframe.txt', '/Users/mohammadbilal/Documents/Projects/OpticalFlow/Simulation/results/GroundSLAM/optimized_keyframe.tum')
